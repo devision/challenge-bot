@@ -13,6 +13,91 @@ let api = {};
 let contest_options;
 let lastUpdate = Date.now();
 
+async function cancelUser(telegram_id, title){
+
+  let sqliteInit;
+  let query;
+  let registeredTitles;
+  let networkId;
+  let networkName;
+  let scores;
+
+  try {
+    sqliteInit = await sqlitePromise;
+  }
+  catch (error){
+    return 2;
+  }
+
+  try {
+    query = await sqliteInit.all('SELECT telegram_id, registered_titles, network_id, network_name, scores FROM bot;');
+  }
+
+  catch (error){
+    return 1;
+  }
+
+  registeredTitles = JSON.parse(query[0].registered_titles);
+  if (registeredTitles[title] === undefined) return 3;
+  networkId = JSON.parse(query[0].network_id);
+  networkName = JSON.parse(query[0].network_name);
+  scores = JSON.parse(query[0].scores);
+
+  delete registeredTitles[title];
+  delete networkId[title];
+  delete networkName[title];
+  delete scores[title];
+
+  registeredTitles = JSON.stringify(registeredTitles);
+  networkId = JSON.stringify(networkId);
+  networkName = JSON.stringify(networkName);
+  scores = JSON.stringify(scores);
+
+  try {
+    query = await sqliteInit.all('UPDATE bot SET registered_titles = ?, network_id = ?, network_name = ?, scores = ? where telegram_id = ?;'
+      ,[registeredTitles, networkId, networkName, scores, telegram_id]);
+  }
+
+  catch (error){
+    return 1;
+  }
+}
+
+// https://stackoverflow.com/a/3177838
+function timeSince(date) {
+
+  var seconds = Math.floor((new Date() - date) / 1000);
+
+  var interval = Math.floor(seconds / 60);
+
+  console.log(interval);
+
+  if (interval > 1) {
+    return interval + " minutes";
+  }
+
+  else if (interval === 1){
+    return interval + " minute"
+  }
+  return Math.floor(seconds) + " seconds";
+}
+
+// https://stackoverflow.com/a/13627586
+function ordinalOf(i) {
+    var j = i % 10,
+        k = i % 100;
+    if (j == 1 && k != 11) {
+        return i + "st";
+    }
+    if (j == 2 && k != 12) {
+        return i + "nd";
+    }
+    if (j == 3 && k != 13) {
+        return i + "rd";
+    }
+    return i + "th";
+}
+
 async function updateScore(telegram_id, score, title){
   let sqliteInit;
   let query;
@@ -39,6 +124,65 @@ async function updateScore(telegram_id, score, title){
   return score;
 }
 
+async function updateCurrentScores(title, options){
+
+  let sqliteInit;
+  let query;
+  let newScore;
+  try {
+    sqliteInit = await sqlitePromise;
+  }
+  catch (error){
+    return 2;
+  }
+
+  try {
+    query = await sqliteInit.all('SELECT telegram_id, network_id, scores FROM bot;');
+  }
+  catch (error){
+    return 1;
+  }
+
+  query.forEach((current, index) => {
+    if (JSON.parse(current.scores)[title] === undefined)query.splice(index, 1);
+  });
+
+  if (query.length === 0){
+    console.log('No scores');
+    return 1;
+  }
+
+
+  if (title === 'IIDX'){
+    query.forEach((current) => {
+      let url = `${api.iidx[options.version]._links.player_bests}?profile_id=${JSON.parse(current.network_id)[title]}`;
+      getScore(options, url, 'IIDX').then((score) => {
+        if (score > JSON.parse(current.scores)[title]) {
+          newScore = JSON.parse(current.scores);
+          newScore[title] = score;
+          sqliteInit.all('UPDATE bot SET scores = ? WHERE telegram_id = ?;'
+          , [JSON.stringify(newScore),current.telegram_id]).then(() => console.log('Updated ' + current.telegram_id));
+        }
+      })
+    })
+  }
+
+  else if (title === 'SDVX'){
+    query.forEach((current) => {
+      let url = `${api.sdvx[options.version]._links.player_bests}?profile_id=${JSON.parse(current.network_id)[title]}`;
+      getScore(options, url, 'SDVX').then((score) => {
+        if (score > JSON.parse(current.scores)[title]) {
+          newScore = JSON.parse(current.scores);
+          newScore[title] = score;
+          sqliteInit.all('UPDATE bot SET scores = ? WHERE telegram_id = ?;'
+          , [JSON.stringify(newScore),current.telegram_id]).then(() => console.log('Updated ' + current.telegram_id));
+        }
+      })
+    })
+  }
+  // return JSON.parse(query[0].network_id)[title];
+}
+
 async function currentScores(title){
   let sqliteInit;
   let query;
@@ -54,12 +198,26 @@ async function currentScores(title){
   catch (error){
     return 1;
   }
-  console.log(query[0].network_name);
-  console.log(JSON.parse(query[0].network_name).IIDX);
-  console.log(JSON.parse(query[0].scores).IIDX);
-  console.log(JSON.parse(query[1].network_name).IIDX);
-  console.log(JSON.parse(query[1].scores).IIDX);
-  return query[0];
+  let string = '';
+
+
+  query.forEach((current, index) => {
+    if (JSON.parse(current.scores)[title] === undefined)query.splice(index, 1);
+  });
+
+  query.sort((first, second) => {
+    if (JSON.parse(first.scores)[title] === JSON.parse(second.scores)[title]) return 0;
+    else if (JSON.parse(first.scores)[title] < JSON.parse(second.scores)[title]) return 1;
+    else if (JSON.parse(first.scores)[title] > JSON.parse(second.scores)[title]) return -1;
+  });
+
+  query.forEach((current,index) => {
+    string = string.concat('`' + ordinalOf(index + 1).padEnd(4, ' ') + ' | ' + 
+      JSON.parse(current.network_name)[title].toString().padEnd(8, ' ') + 
+      ' | ' + JSON.parse(current.scores)[title].toString().padEnd(4, ' ') + '`' + '\n');
+  })
+
+  return string;
 }
 
 async function retrieveIdLocal(telegram_id, title){
@@ -119,16 +277,12 @@ async function updateNetworkName(telegram_id, networkName, title){
   }
   try {
     query = await sqliteInit.all('SELECT network_name FROM bot WHERE telegram_id = ?;',[telegram_id]);
-    console.log('Names - updateNetworkName');
-    console.log(names);
     names = JSON.parse(query[0].network_name);
     names[title] = networkName;
-    console.log(names);
     await sqliteInit.all('UPDATE bot SET network_name = ? WHERE telegram_id = ?;'
       ,[JSON.stringify(names), telegram_id]);
   }
   catch (error){
-    console.log('error');
     return 1;
   }
 }
@@ -174,7 +328,6 @@ async function getContestData(){
   dbResult.forEach((current, index) => {
     contestData[current.title] = {version: current.version, chart_id: current.chart_id}; 
   });
-  console.log(contestData);
   return contestData;
 }
 
@@ -376,7 +529,7 @@ async function initializeApplication() {
   throw new Error('APP_INIT_FAILED');
 }
 
-async function getScore(options, url, currentScore = 0){
+async function getScore(options, url, title, currentScore = 0){
 
   const requestParameters = {
     url: url,
@@ -388,11 +541,27 @@ async function getScore(options, url, currentScore = 0){
   let score = currentScore;
   const data = await rp(requestParameters);
   for (let i = 0; i < data._items.length; i++) {
-    if ((data._items[i].chart_id === options.chart_id) && (data._items[i].ex_score > score)) {
-      score = data._items[i].ex_score;
+
+    if (title === 'IIDX'){
+      if ((data._items[i].chart_id === options.chart_id) && (data._items[i].ex_score > score)) {
+        score = data._items[i].ex_score;
+      }
+    }
+
+    else if (title === 'SDVX'){
+      if ((data._items[i].chart_id === options.chart_id) && (data._items[i].score > score)) {
+        score = data._items[i].score;
+      }
     }
   }
-  if (data._links._next) return getScore(options, data._links._next, score);
+
+  if (data._links._next) {
+    // console.log('Next page');
+    // console.log(score);
+    if (title === 'IIDX') return getScore(options, data._links._next, 'IIDX', score);
+    if (title === 'SDVX') return getScore(options, data._links._next, 'SDVX', score);
+  }
+
   return score;
 }
 
@@ -401,6 +570,7 @@ async function getId(options, title) {
   let url;
   if (title === 'IIDX') url = api.iidx[options.version]._links.profiles + `?dj_name=${options.player_name}`;
   else if (title === 'SDVX') url = api.sdvx[options.version]._links.profiles + `?name=${options.player_name}`;
+  console.log(url);
   const requestParameters = {
     url: url,
     json: true,
@@ -490,4 +660,4 @@ async function getPlayerData(options, title) {
 
 module.exports = {getId, getScore, initApi, getContestData, initializeApplication, initializeDatabase, 
                   sqlitePromise, getPlayerData, initUser, checkRegistry, updateState, getCurrentState, registerTitle, 
-                  updateNetworkName, updateId, retrieveIdLocal, api, updateScore,currentScores, lastUpdate};
+                  updateNetworkName, updateId, retrieveIdLocal, api, updateScore,currentScores, lastUpdate, timeSince, updateCurrentScores, cancelUser}

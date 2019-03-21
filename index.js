@@ -20,6 +20,8 @@ const bot = new TelegramBot(TELEGRAM_API_TOKEN, telegramOptions);
 bot.setWebHook(host, {certificate: telegramOptions.webHook.cert});
 
 let contestData = {};
+let timer_iidx;
+let timer_sdvx;
 
 challenge.initializeApplication().then((success) => {
   if (success === 'APP_INIT_SUCCESS') {
@@ -33,9 +35,13 @@ challenge.initializeApplication().then((success) => {
 
 .then((result) => {
   contestData = result;
-  challenge.currentScores();
-  console.log(new Date(challenge.lastUpdate).toString());
-  console.log(challenge.api.sdvx[4]._links.profiles);
+  console.log(contestData);
+  timer_iidx = setInterval(() => 
+    challenge.updateCurrentScores('IIDX', {version: contestData.iidx.version, chart_id: contestData.iidx.chart_id})
+    .then(() => challenge.lastUpdate = Date.now()), 60000);
+  timer_sdvx = setInterval(() => 
+    challenge.updateCurrentScores('SDVX', {version: contestData.sdvx.version, chart_id: contestData.sdvx.chart_id})
+    .then(() => challenge.lastUpdate = Date.now()), 60000);
 })
 
 .then(() => {
@@ -59,18 +65,7 @@ challenge.initializeApplication().then((success) => {
     })
   });
 
-  bot.onText(/\/test/i, (msg, match) => {
-      bot.sendMessage(msg.from.id,
-        `*Current standings for Sound Voltex*\n\n`+
-        `*1st* - Player1 - 1874\n`+
-        `*2nd* - Player2 - 1594\n`+
-        `*3rd* - Player3 - 1567\n`+
-        `*4th* - Player4 - 1478\n`+
-        `*5th* - Player5 - 1426\n`
-        ,{parse_mode:'Markdown'});
-  });
-
-  bot.onText(/\/register/i, (msg, match) => {
+  bot.onText(/^\/register$/i, (msg, match) => {
     if (msg.chat.type != "private"){
       bot.sendMessage(msg.chat.id, 'Please message bot privately to register');
     }
@@ -95,19 +90,60 @@ challenge.initializeApplication().then((success) => {
   });
 
   bot.onText(/^\/register@(.+bot)$/i, (msg, match) => {
-    console.log("Received /register command");
     if (msg.chat.type != "private"){
       bot.sendMessage(msg.chat.id, 'Please message bot privately to register');
     }
   });
 
-  bot.onText(/^(?:Yes|No)$/i,(msg, match) => {
-    if (/^(?:Yes)$/i.test(match)) console.log("Received Yes");
-    else console.log("Received No");
+  bot.onText(/^\/standings$|^\/standings@(.+bot)$/i,(msg, match) => {
+    challenge.currentScores('IIDX').then((scores) => {
+    bot.sendMessage(msg.chat.id,
+      'Current standings:\n' + 
+      '*Beatmania IIDX*\n' + 
+      "`=".padEnd(26,'=') + '`\n' + scores + 
+      "`=".padEnd(26,'=') + '`\n' + '*Last update:* ' + 
+      challenge.timeSince(challenge.lastUpdate) + ' ago.'
+      ,{parse_mode:'Markdown',
+        reply_markup:{inline_keyboard:
+          [[{text:'Sound Voltex', callback_data:'SCORE_SDVX'},
+          {text:'Refresh', callback_data:'SCORE_IIDX'}]]
+        }
+      });
+    })
+  });
+
+  bot.onText(/^\/charts$|^\/charts@(.+bot)$/i,(msg, match) => {
+    bot.sendMessage(msg.chat.id,
+      'Current charts:\n'+
+      '*Beatmania IIDX:* \n灼熱Beach Side Bunny SPN7\n\n'+
+      '*Sound Voltex:* \nVOLTEXES IV EXH14'
+      ,{parse_mode:'Markdown'}
+      );
+  });
+
+  bot.onText(/^\/cancel$|^\/cancel@(.+bot)$/i,(msg, match) => {
+      if (msg.chat.type != "private"){
+          bot.sendMessage(msg.chat.id, 'Please message bot privately to cancel your participation.');
+      }
+      else{
+        challenge.currentScores('IIDX').then((scores) => {
+        bot.sendMessage(msg.from.id,'Select the title for which you want to cancel your participation.'
+          ,{parse_mode:'Markdown',
+            reply_markup:{inline_keyboard:
+              [[{text:'Beatmania IIDX', callback_data:'CANCEL_IIDX'},
+              {text:'Sound Voltex', callback_data:'CANCEL_SDVX'}]]
+            }
+          });
+        })
+      }
   });
 
   bot.onText(/^[^/]{1}[^\s]*$/i, (msg, match) => {
-    challenge.getCurrentState(msg.from.id).then((state) => {
+    if (msg.chat.type != "private"){
+      console.info('Non-private message');
+    }
+    else {
+      challenge.getCurrentState(msg.from.id).then((state) => {
       let options = {};
       switch (state.current_state){
         case 'REG_NAME_AWAIT_IIDX':
@@ -166,6 +202,7 @@ challenge.initializeApplication().then((success) => {
           break;
       }
     })
+    }
   });
 
   bot.on('callback_query', (callback) => {
@@ -234,7 +271,7 @@ challenge.initializeApplication().then((success) => {
           };
 
           let url = `${challenge.api.iidx[options.version]._links.player_bests}?profile_id=${id.IIDX}`;
-          return challenge.getScore(options, url);
+          return challenge.getScore(options, url,'IIDX');
           })
 
         .then((score) => {
@@ -264,7 +301,7 @@ challenge.initializeApplication().then((success) => {
           };
 
           let url = `${challenge.api.sdvx[options.version]._links.player_bests}?profile_id=${id.SDVX}`;
-          return challenge.getScore(options, url);
+          return challenge.getScore(options, url,'SDVX');
           })
           .then((score) => {
             return challenge.updateScore(callback.from.id, score, 'SDVX');
@@ -295,7 +332,7 @@ challenge.initializeApplication().then((success) => {
         break;
 
       case 'REG_DENY_SDVX':
-        challenge.updateState(callback.from.id, 'REG_NAME_AWAIT_SDVX', 'REG_NAME_CALLBACK_SDVX')
+        challenge.updateState(callback.from.id, 'REG_NAME_AWAIT_SDVX', 'REG_NAME_CALLBACK_SDVX');
         bot.answerCallbackQuery(callback.id);
         bot.editMessageText(`No problem, let's try again!\nSend me your SDVX player name.`,
           {
@@ -303,8 +340,165 @@ challenge.initializeApplication().then((success) => {
             "message_id":callback.message.message_id
           }
         );
-        break; 
+        break;
 
+      case 'SCORE_SDVX':
+        challenge.updateState(callback.from.id, 'SCORE_SDVX', 'SCORE_CALLBACK_SDVX');
+        bot.answerCallbackQuery(callback.id);
+        challenge.currentScores('SDVX').then((scores) => {
+          console.log(challenge.lastUpdate);
+          bot.editMessageText(
+            'Current standings:\n' + 
+            '*Sound Voltex*\n' + 
+            "`=".padEnd(26,'=') + '`\n' + scores + 
+            "`=".padEnd(26,'=') + '`\n' + '*Last update:* ' + 
+            challenge.timeSince(challenge.lastUpdate) + ' ago.',
+              {
+                parse_mode:'Markdown',
+                chat_id:callback.message.chat.id,
+                message_id:callback.message.message_id,
+                reply_markup:{
+                  inline_keyboard:
+                    [[{text:'Beatmania IIDX', callback_data:'SCORE_IIDX'},
+                    {text:'Refresh', callback_data:'SCORE_SDVX'}]]
+                }
+              })
+        .then((resolve) => bot.answerCallbackQuery(callback.id)
+            ,reject => bot.answerCallbackQuery(callback.id,{text:'No changes in standings.'}));
+          }); 
+        break;
+
+      case 'SCORE_IIDX':
+        challenge.updateState(callback.from.id, 'SCORE_IIDX', 'SCORE_CALLBACK_IIDX');
+        challenge.currentScores('IIDX').then((scores) => {
+          bot.editMessageText(
+            'Current standings:\n' + 
+            '*Beatmania IIDX*\n' + 
+            "`=".padEnd(26,'=') + '`\n' + scores + 
+            "`=".padEnd(26,'=') + '`\n' + '*Last update:* ' + 
+            challenge.timeSince(challenge.lastUpdate) + ' ago.',
+              {
+                parse_mode:'Markdown',
+                chat_id:callback.message.chat.id,
+                message_id:callback.message.message_id,
+                reply_markup:{
+                  inline_keyboard:
+                    [[{text:'Sound Voltex', callback_data:'SCORE_SDVX'},
+                    {text:'Refresh', callback_data:'SCORE_IIDX'}]]
+                }
+              })
+          .then((resolve) => bot.answerCallbackQuery(callback.id)
+            ,reject => bot.answerCallbackQuery(callback.id,{text:'No changes in standings.'}));
+          }); 
+        break;
+
+      case 'CANCEL_SDVX':
+        challenge.updateState(callback.from.id, 'CANCEL_SDVX_CONFIRM_AWAIT', 'CANCEL_CALLBACK_SDVX');
+        bot.answerCallbackQuery(callback.id);
+        challenge.checkRegistry(callback.from.id, 'SDVX').then((result) => {
+          if (result === true){
+            bot.editMessageText(`You are about to cancel your participation in Sound Voltex.\n\n*Are you sure?*`,
+              {
+                parse_mode:'Markdown',
+                "chat_id":callback.message.chat.id,
+                "message_id":callback.message.message_id,
+                reply_markup:{
+                      inline_keyboard:
+                        [[{text:'Yes', callback_data:'CANCEL_SDVX_COMPLETE'},
+                        {text:'No', callback_data:'CANCEL_SDVX_REJECT'}]]
+                }
+              }
+            );
+          }
+
+          else if (result === false){
+            bot.editMessageText(`You are not registered for Sound Voltex.`,
+              {
+                parse_mode:'Markdown',
+                "chat_id":callback.message.chat.id,
+                "message_id":callback.message.message_id
+              }
+            );
+          }
+        })
+        break;
+
+      case 'CANCEL_IIDX':
+        challenge.updateState(callback.from.id, 'CANCEL_IIDX_CONFIRM_AWAIT', 'CANCEL_CALLBACK_IIDX');
+        bot.answerCallbackQuery(callback.id);
+        challenge.checkRegistry(callback.from.id, 'IIDX').then((result) => {
+          if (result === true){
+            bot.editMessageText(`You are about to cancel your participation in Beatmania IIDX.\n\n*Are you sure?*`,
+              {
+                parse_mode:'Markdown',
+                "chat_id":callback.message.chat.id,
+                "message_id":callback.message.message_id,
+                reply_markup:{
+                      inline_keyboard:
+                        [[{text:'Yes', callback_data:'CANCEL_IIDX_COMPLETE'},
+                        {text:'No', callback_data:'CANCEL_IIDX_REJECT'}]]
+                }
+              }
+            );
+          }
+
+          else if (result === false){
+            bot.editMessageText(`You are not registered for Beatmania IIDX.`,
+              {
+                parse_mode:'Markdown',
+                "chat_id":callback.message.chat.id,
+                "message_id":callback.message.message_id
+              }
+            );
+          }
+        })
+        break;
+
+      case 'CANCEL_IIDX_COMPLETE':
+        bot.answerCallbackQuery(callback.id);
+        challenge.cancelUser(callback.from.id, 'IIDX').then(() => {
+          bot.editMessageText(`Your participation in Beatmania IIDX has been cancelled.`,
+            {
+              parse_mode:'Markdown',
+              "chat_id":callback.message.chat.id,
+              "message_id":callback.message.message_id,
+            }
+          );
+        });
+        break;
+
+      case 'CANCEL_SDVX_COMPLETE':
+        bot.answerCallbackQuery(callback.id);
+        challenge.cancelUser(callback.from.id, 'SDVX').then(() => {
+          bot.editMessageText(`Your participation in Sound Voltex has been cancelled.`,
+            {
+              parse_mode:'Markdown',
+              "chat_id":callback.message.chat.id,
+              "message_id":callback.message.message_id,
+            }
+          );
+        });
+        break;
+
+      case 'CANCEL_IIDX_REJECT':
+        bot.editMessageText(`Good to see you stay with us!`,
+            {
+              parse_mode:'Markdown',
+              "chat_id":callback.message.chat.id,
+              "message_id":callback.message.message_id,
+            }
+        );
+        break;
+
+      case 'CANCEL_SDVX_REJECT':
+        bot.editMessageText(`Good to see you stay with us!`,
+            {
+              parse_mode:'Markdown',
+              "chat_id":callback.message.chat.id,
+              "message_id":callback.message.message_id,
+            }
+        );
+        break;
     }
   });
 })
