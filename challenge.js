@@ -30,12 +30,13 @@ async function cancelUser(telegram_id, title){
   }
 
   try {
-    query = await sqliteInit.all('SELECT telegram_id, registered_titles, network_id, network_name, scores FROM bot;');
+    query = await sqliteInit.all('SELECT telegram_id, registered_titles, network_id, network_name, scores FROM bot WHERE telegram_id = ?;', [telegram_id]);
   }
 
   catch (error){
     return 1;
   }
+
 
   registeredTitles = JSON.parse(query[0].registered_titles);
   if (registeredTitles[title] === undefined) return 3;
@@ -69,8 +70,6 @@ function timeSince(date) {
   var seconds = Math.floor((new Date() - date) / 1000);
 
   var interval = Math.floor(seconds / 60);
-
-  console.log(interval);
 
   if (interval > 1) {
     return interval + " minutes";
@@ -129,6 +128,7 @@ async function updateCurrentScores(title, options){
   let sqliteInit;
   let query;
   let newScore;
+  let array;
   try {
     sqliteInit = await sqlitePromise;
   }
@@ -143,18 +143,18 @@ async function updateCurrentScores(title, options){
     return 1;
   }
 
-  query.forEach((current, index) => {
-    if (JSON.parse(current.scores)[title] === undefined)query.splice(index, 1);
-  });
-
   if (query.length === 0){
-    console.log('No scores');
     return 1;
   }
 
+  array = query.filter((current, index) =>{
+    return !(JSON.parse(current.scores)[title] === undefined)
+  });
+
+
 
   if (title === 'IIDX'){
-    query.forEach((current) => {
+    array.forEach((current) => {
       let url = `${api.iidx[options.version]._links.player_bests}?profile_id=${JSON.parse(current.network_id)[title]}`;
       getScore(options, url, 'IIDX').then((score) => {
         if (score > JSON.parse(current.scores)[title]) {
@@ -168,7 +168,7 @@ async function updateCurrentScores(title, options){
   }
 
   else if (title === 'SDVX'){
-    query.forEach((current) => {
+    array.forEach((current) => {
       let url = `${api.sdvx[options.version]._links.player_bests}?profile_id=${JSON.parse(current.network_id)[title]}`;
       getScore(options, url, 'SDVX').then((score) => {
         if (score > JSON.parse(current.scores)[title]) {
@@ -186,6 +186,7 @@ async function updateCurrentScores(title, options){
 async function currentScores(title){
   let sqliteInit;
   let query;
+  let array;
   try {
     sqliteInit = await sqlitePromise;
   }
@@ -200,18 +201,23 @@ async function currentScores(title){
   }
   let string = '';
 
-
-  query.forEach((current, index) => {
-    if (JSON.parse(current.scores)[title] === undefined)query.splice(index, 1);
+  array = query.filter((current, index) =>{
+    return !(JSON.parse(current.scores)[title] === undefined)
   });
 
-  query.sort((first, second) => {
+  // query.forEach((current, index, array) => {
+  //   if (JSON.parse(current.scores)[title] === undefined) {
+  //     array = query.splice(index, 1);
+  //   }
+  // });
+
+  array.sort((first, second) => {
     if (JSON.parse(first.scores)[title] === JSON.parse(second.scores)[title]) return 0;
     else if (JSON.parse(first.scores)[title] < JSON.parse(second.scores)[title]) return 1;
     else if (JSON.parse(first.scores)[title] > JSON.parse(second.scores)[title]) return -1;
   });
 
-  query.forEach((current,index) => {
+  array.forEach((current,index) => {
     string = string.concat('`' + ordinalOf(index + 1).padEnd(4, ' ') + ' | ' + 
       JSON.parse(current.network_name)[title].toString().padEnd(8, ' ') + 
       ' | ' + JSON.parse(current.scores)[title].toString().padEnd(4, ' ') + '`' + '\n');
@@ -300,13 +306,10 @@ async function updateId(telegram_id, networkId, title){
   }
   try {
     query = await sqliteInit.all('SELECT network_id FROM bot WHERE telegram_id = ?;',[telegram_id]);
-    console.log(query);
     ids = JSON.parse(query[0].network_id);
-    console.log(ids);
     ids[title] = networkId;
     await sqliteInit.all('UPDATE bot SET network_id = ? WHERE telegram_id = ?;'
       ,[JSON.stringify(ids), telegram_id]);
-    console.log(ids);
   }
   catch (error){
     return 1;
@@ -521,8 +524,6 @@ async function initializeApplication() {
   }
   console.info('API successfully initialized.');
 
-  // console.log(api.sdvx[4]._links);
-
   if (database === 'DB_INIT_SUCCESS'
     && apiStructure === 'API_INIT_SUCCESS') return 'APP_INIT_SUCCESS';
 
@@ -556,8 +557,6 @@ async function getScore(options, url, title, currentScore = 0){
   }
 
   if (data._links._next) {
-    // console.log('Next page');
-    // console.log(score);
     if (title === 'IIDX') return getScore(options, data._links._next, 'IIDX', score);
     if (title === 'SDVX') return getScore(options, data._links._next, 'SDVX', score);
   }
@@ -566,11 +565,11 @@ async function getScore(options, url, title, currentScore = 0){
 }
 
 async function getId(options, title) {
+
   let request;
   let url;
   if (title === 'IIDX') url = api.iidx[options.version]._links.profiles + `?dj_name=${options.player_name}`;
   else if (title === 'SDVX') url = api.sdvx[options.version]._links.profiles + `?name=${options.player_name}`;
-  console.log(url);
   const requestParameters = {
     url: url,
     json: true,
@@ -583,8 +582,8 @@ async function getId(options, title) {
   catch (error) {
     throw error;
   }
-  if (request._items[0] === undefined) throw (new Error('NO_PLAYER_DATA'));
-  else return (request._items[0]._id);
+  if (request._items[request._items.length - 1] === undefined) throw (new Error('NO_PLAYER_DATA'));
+  else return (request._items[request._items.length - 1]._id);
 }
 
 async function getPlayerData(options, title) {

@@ -35,19 +35,17 @@ challenge.initializeApplication().then((success) => {
 
 .then((result) => {
   contestData = result;
-  console.log(contestData);
   timer_iidx = setInterval(() => 
     challenge.updateCurrentScores('IIDX', {version: contestData.iidx.version, chart_id: contestData.iidx.chart_id})
-    .then(() => challenge.lastUpdate = Date.now()), 60000);
+    .then(() => challenge.lastUpdate = Date.now()), 300000);
   timer_sdvx = setInterval(() => 
     challenge.updateCurrentScores('SDVX', {version: contestData.sdvx.version, chart_id: contestData.sdvx.chart_id})
-    .then(() => challenge.lastUpdate = Date.now()), 60000);
+    .then(() => challenge.lastUpdate = Date.now()), 300000);
 })
 
 .then(() => {
   bot.onText(/\/help$|\/help@(.+bot)|\/start$|\/start@(.+bot)/i, (msg, match) => {
     challenge.initUser(msg.from.id).then((result) => {
-      console.log(result);
       if (result === 2 || result === 3) {
         bot.sendMessage(msg.chat.id, 'Something went wrong, please message bot owner.')
       }
@@ -55,9 +53,12 @@ challenge.initializeApplication().then((success) => {
       else if (result === 0 || result === 1) {
         bot.sendMessage(msg.chat.id,
           `Hello, ${msg.from.username}!\n`+
+          `Welcome to GTsM Rhythm Contest!\n\n`+
+          `Play selected charts and push your way to the top!\n`+
           `Use the commands below to participate in the challenge:\n\n`+
           `\/register - register your network account.\n`+
           `\/standings - display current standings.\n`+
+          `\/charts - display current contest charts.\n`+
           `\/cancel - cancel your participation.\n\n`+
           `Please remember: commands, related to your account are only accessible if you message me personally.`
         ,{parse_mode:'Markdown'});
@@ -71,13 +72,12 @@ challenge.initializeApplication().then((success) => {
     }
     else{
       challenge.updateState(msg.from.id, 'REG_INIT', 'REGISTER').then((result) => {
-        console.log(result);
         if (result === 0) {
           bot.sendMessage(msg.chat.id,
             'Please select a challenge to participate in.',
               {reply_markup:{
                 inline_keyboard:
-                  [[{text:'Beatmania',callback_data:'REG_REQ_IIDX'},
+                  [[{text:'Beatmania IIDX',callback_data:'REG_REQ_IIDX'},
                     {text:'Sound Voltex', callback_data:'REG_REQ_SDVX'}
                   ]]
                 }
@@ -153,7 +153,6 @@ challenge.initializeApplication().then((success) => {
             chart_id: contestData.iidx.chart_id
           };
           challenge.getPlayerData(options, 'IIDX').then((response) => {
-            console.log(response);
             if (response === 1) bot.sendMessage(msg.chat.id, 'Player wasn\'t found, please try again.');
             else {
               challenge.updateState(msg.from.id, 'REG_CONFIRM_AWAIT_IIDX', 'REG_NAME_ENTRY')
@@ -191,7 +190,7 @@ challenge.initializeApplication().then((success) => {
               .then(() => {
                 bot.sendMessage(msg.chat.id,
                   `Does this look like you?\n`+
-                  `*PLayer name:*${response.name}\n`+
+                  `*Player name:*${response.name}\n`+
                   `*SDVX ID:*${response.sdvx_id}\n`
                 ,{parse_mode:'Markdown',
                   reply_markup:{inline_keyboard:[[{text:'Yes', callback_data:'REG_CONFIRM_SDVX'},{text:'No', callback_data:'REG_DENY_SDVX'}]]}
@@ -281,7 +280,9 @@ challenge.initializeApplication().then((success) => {
           if(score === 0) bot.sendMessage(callback.from.id, 
             `Looks like you haven't played this chart yet.\n`+
             `Don't worry, your score will appear in the contest once you play it.`);
-          else bot.sendMessage(callback.from.id, `Found it! Your high score for the current chart is ${score}.`);
+          else bot.sendMessage(callback.from.id, `Found it! Your high score for the current contest chart is ${score} and has been recorded.
+            \nCheck /standings command to see how you fare against other players.
+            \nFrom now on all future scores will be updated automatically.`);
         })
         break;
 
@@ -314,7 +315,9 @@ challenge.initializeApplication().then((success) => {
               bot.answerCallbackQuery(callback.id);
             }
             else {
-              bot.sendMessage(callback.from.id, `Found it! Your high score for the current chart is ${score}.`);
+              bot.sendMessage(callback.from.id, `Found it! Your high score for the current contest chart is ${score} and has been recorded.
+                \nCheck /standings command to see how you fare against other players.
+                \nFrom now on all future scores will be updated automatically.`);
               bot.answerCallbackQuery(callback.id);
             }
           });
@@ -346,7 +349,6 @@ challenge.initializeApplication().then((success) => {
         challenge.updateState(callback.from.id, 'SCORE_SDVX', 'SCORE_CALLBACK_SDVX');
         bot.answerCallbackQuery(callback.id);
         challenge.currentScores('SDVX').then((scores) => {
-          console.log(challenge.lastUpdate);
           bot.editMessageText(
             'Current standings:\n' + 
             '*Sound Voltex*\n' + 
@@ -481,6 +483,7 @@ challenge.initializeApplication().then((success) => {
         break;
 
       case 'CANCEL_IIDX_REJECT':
+        bot.answerCallbackQuery(callback.id);
         bot.editMessageText(`Good to see you stay with us!`,
             {
               parse_mode:'Markdown',
@@ -491,6 +494,7 @@ challenge.initializeApplication().then((success) => {
         break;
 
       case 'CANCEL_SDVX_REJECT':
+        bot.answerCallbackQuery(callback.id);
         bot.editMessageText(`Good to see you stay with us!`,
             {
               parse_mode:'Markdown',
